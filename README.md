@@ -3,7 +3,7 @@
 </div>
 
 A TypeScript pipeline redraws this card every day as an Omarchy (Hyprland) desktop:
-a fastfetch terminal with an ASCII portrait of the avatar, a btop-style monitor and a
+a fastfetch terminal with the avatar drawn as terminal art, a btop-style monitor and a
 contribution heatmap, tiled under a top bar. The bar clock shows when the statistics
 were last collected.
 
@@ -49,8 +49,9 @@ The preview uses an embedded public avatar and illustrative values from
 instead of downloading Playwright's, set `CHROMIUM_PATH=/usr/bin/chromium`.
 
 ```sh
-bun run preview --theme=cycle --out=out/preview-cycle   # step through the themes
-bun run preview --theme=gruvbox                          # any theme in themes/
+bun run preview --theme=gruvbox --portrait=mono         # one theme, one portrait style
+bun run preview --theme=cycle --portrait=cycle          # step through both
+bun run preview --out=out/preview-other                 # write somewhere else
 bun run check
 bun test app/
 ```
@@ -64,6 +65,18 @@ bun test app/
   `themes/`, e.g. `tokyo-night`, for a fixed theme and a GIF about a quarter the size.
 - A new theme is one `colors.toml` in Omarchy's format plus a `name`, saved in
   `themes/`.
+- Portrait: `portrait` in `config.json` picks how the avatar is drawn.
+
+  | Style | Look | Cycling GIF |
+  |---|---|---|
+  | `blocks` | ANSI art: shade blocks dithered along a ramp of the theme's colours | 1.6 MB |
+  | `color` | small characters coloured per surface, like a fastfetch logo | 2.0 MB |
+  | `matrix` | `0` and `1` in the theme's green with scanlines and phosphor glow | 2.7 MB |
+  | `mono` | one-colour character ramp with outlines as slash, bar and underscore strokes, and film grain | 2.4 MB |
+
+  `cycle`, the default, gives every theme the next style in that order (2.0 MB with
+  all seven themes). The avatar is cut out of its background first; this needs an
+  avatar with a flat-colour background, otherwise the whole image is used.
 
 Text that does not fit its box stops the render with the name of the row, and a GIF
 over 3 MB is not written. In both cases the previous images stay in place.
@@ -98,8 +111,9 @@ the personal token has no write permissions.
 - `app/config.ts`, `app/themes.ts`: validated `config.json` and `themes/*.toml`.
 - `app/scene/`: the desktop, bundled for the browser. `view.ts` builds the HTML from
   the snapshot and one animation state, `timeline.ts` lists the states and their
-  timing, `portrait.ts` draws the ASCII avatar. Layout and colours are in
-  `assets/card.css`.
+  timing. `cutout.ts` removes the avatar's background, `cells.ts` measures what each
+  character cell contains, and `portrait.ts` draws the four portrait styles from that.
+  Layout and colours are in `assets/card.css`.
 - `app/render.ts`: steps the timeline in headless Chromium without network access and
   exports the PNG and GIF.
 - `app/gif.ts`: GIF writer that stores only the pixels that changed between frames.
