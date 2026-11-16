@@ -6,9 +6,7 @@ import type { ColorToken, PortraitStyle } from './types.js';
 type Colors = Record<ColorToken, string>;
 type RGB = [number, number, number];
 export interface PortraitFrame {
-  /** Position of the light sweep across the portrait, 0-1, or -1 when there is none. */
-  sweep: number;
-  /** Animation step, for effects that flicker. */
+  /** Idle animation step. 0 is the portrait at rest; every hold frame after that disturbs it a little. */
   tick: number;
   /** How much of the portrait has appeared, 0-1. */
   reveal: number;
@@ -23,6 +21,14 @@ export interface Portrait {
 /** The subject is drawn this wide, inside a margin that leaves room for its glow. */
 const INNER = 408, PAD = 16, MAX_HEIGHT = 416;
 const RAMP = ' .:-=+*#%@';
+/** What a stroke briefly turns into while the mono portrait is unsettled. */
+const GLITCH = '/\\|-_+*=<>';
+/** Cipher text: what a character of the colour portrait looks like before it is decrypted. */
+const CIPHER = '01#$%&@?<>{}[]';
+/** Brightness of a rain drop from its head back along its tail. */
+const RAIN = [1, 0.55, 0.32, 0.18];
+/** Width, in blocks, of the raw escape code the blocks portrait prints when it glitches. */
+const ESCAPE_CELLS = 13;
 const WHITE: RGB = [255, 252, 244];
 
 const hex = (color: string): RGB => [1, 3, 5].map(index => parseInt(color.slice(index, index + 2), 16)) as RGB;
@@ -44,12 +50,6 @@ function makeCanvas(width: number, height: number): [HTMLCanvasElement, CanvasRe
 }
 /** A soft light from the top left, -0.5..0.5, so flat cartoon surfaces get some shading. */
 const light = (u: number, v: number) => 0.5 - (u * 0.55 + v) / 1.55;
-/** Strength of the diagonal light sweep at a point, 0-1. */
-function shine(u: number, v: number, sweep: number): number {
-  if (sweep < 0) return 0;
-  const distance = Math.abs((u + 0.5 * v) / 1.5 - (sweep * 1.4 - 0.2));
-  return distance < 0.1 ? 1 - distance / 0.1 : 0;
-}
 /** Adds a blurred copy of the drawing on top of itself: the glow of lit characters. */
 function bloom(canvas: HTMLCanvasElement, radius: number, alpha: number): void {
   const [copy, copyContext] = makeCanvas(canvas.width, canvas.height);
@@ -113,10 +113,16 @@ export async function loadPortrait(source: string): Promise<Portrait> {
     return entry;
   }
 
+  // Every style draws the portrait at rest, lets it glow, and only then adds its idle effect
+  // as small crisp touches. Glowing the effect too would smear every change across the
+  // picture and make each animation frame many times heavier.
+  const idle = (frame: PortraitFrame) => frame.tick > 0 && frame.reveal === 1;
+
   /** Characters at terminal size in one colour, outlines as strokes: the classic ASCII look. */
   function mono(canvas: HTMLCanvasElement, colors: Colors, frame: PortraitFrame, matrix: boolean): void {
     const context = canvas.getContext('2d')!;
     const cellWidth = 8, cellHeight = 16, columns = INNER / cellWidth, rows = innerHeight / cellHeight;
+    const fieldColumns = width / cellWidth, fieldRows = height / cellHeight, offsetX = PAD / cellWidth, offsetY = PAD / cellHeight;
     const { cells, spots: eyes } = grid(columns, rows);
     const background = hex(colors.bg), ink = hex(matrix ? colors.green : colors.accent), bright = hex(colors.fgBright);
     context.font = "700 14px 'Card Mono', monospace";
@@ -126,46 +132,85 @@ export async function loadPortrait(source: string): Promise<Portrait> {
       context.fillStyle = css(color);
       context.fillText(glyph, column * cellWidth + cellWidth / 2, row * cellHeight + cellHeight / 2 + 1);
     };
-    // A faint field behind the subject, like an idle screen: dots, or stray bits for the matrix.
-    for (let row = 0; row < height / cellHeight; row++) for (let column = 0; column < width / cellWidth; column++) {
-      if (matrix ? hash(column, row, 3) < 0.55 : true) put(matrix ? (hash(column, row, 4) < 0.5 ? '0' : '1') : '·', column, row, mix(background, ink, matrix ? 0.07 : 0.16));
-    }
-    const step = Math.floor(frame.reveal * 8);
-    for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
-      const cell = row * columns + column, coverage = cells.coverage[cell], lineWork = cells.line[cell] > 0.14;
-      if (coverage < 0.2 || (coverage < 0.55 && !lineWork)) continue;
-      const u = column / columns, v = row / rows, order = hash(column, row, 7);
-      // Mono resolves out of noise in random order; the matrix rains in from the top.
-      if (matrix ? v > frame.reveal * 1.25 - order * 0.25 : frame.reveal < 1 && order > frame.reveal * 1.3) continue;
-      const x = PAD + column * cellWidth, y = PAD + row * cellHeight;
+    const scanlines = (x: number, y: number, w: number, h: number) => {
+      context.fillStyle = css(background, 0.34);
+      for (let line = y + 2; line < y + h; line += 4) context.fillRect(x, line, w, 2);
+    };
+    const lineWork = (cell: number) => cells.line[cell] > 0.14;
+    const shown = (column: number, row: number) => column >= 0 && row >= 0 && column < columns && row < rows
+      && cells.coverage[row * columns + column] >= (lineWork(row * columns + column) ? 0.2 : 0.55);
+    /** Draws one cell of the subject. A `variant` above 0 gives its scrambled look for that step. */
+    const draw = (column: number, row: number, variant: number) => {
+      const cell = row * columns + column, x = PAD + column * cellWidth, y = PAD + row * cellHeight;
+      const tone = clamp(cells.tone[cell] + light(column / columns, row / rows) * 0.12), at = [column + offsetX, row + offsetY] as const;
       context.clearRect(x, y, cellWidth, cellHeight);
-      const glow = shine(u, v, frame.sweep), tone = clamp(cells.tone[cell] + light(u, v) * 0.12);
-      const at = [column + PAD / cellWidth, row + PAD / cellHeight] as const;
       if (matrix) {
         // Every cell is a bit; brightness alone carries the picture. Outlines stay dark.
-        const level = lineWork && cells.line[cell] > 0.3 ? 0.03 : clamp(0.34 + Math.pow(tone, 1.4) * 0.78 + glow * 0.4);
-        context.fillStyle = css(mix(background, ink, 0.05 + level * 0.14));
+        // A flipping bit (a variant) lights up for its step.
+        const level = variant ? 1 : cells.line[cell] > 0.3 ? 0.03 : clamp(0.34 + Math.pow(tone, 1.4) * 0.78);
+        context.fillStyle = css(mix(background, ink, variant ? 0.32 : 0.05 + level * 0.14));
         context.fillRect(x, y, cellWidth, cellHeight);
-        const flipped = hash(column, row, frame.tick) < 0.01 ? frame.tick : 0;
-        const color = level < 0.72 ? mix(mix(background, ink, 0.2), ink, level / 0.72) : mix(ink, [236, 255, 232], (level - 0.72) / 0.28 * 0.85);
-        put(hash(column, row, 11 + flipped) < 0.5 ? '0' : '1', ...at, color);
-      } else if (frame.reveal < 1 && order > frame.reveal * 1.3 - 0.3) {
-        put(RAMP[1 + Math.floor(hash(column, row, step + 20) * (RAMP.length - 1))], ...at, mix(background, ink, 0.5));
-      } else if (eyes.has(cell) || lineWork) {
-        put(eyes.has(cell) ? 'o' : strokeFor(cells.angle[cell], cells.height[cell]), ...at, mix(bright, [255, 255, 255], glow * 0.5));
+        put(hash(column, row, 11 + variant) < 0.5 ? '0' : '1', ...at, level < 0.72 ? mix(mix(background, ink, 0.2), ink, level / 0.72) : mix(ink, [236, 255, 232], (level - 0.72) / 0.28 * 0.85));
+      } else if (eyes.has(cell)) {
+        put('o', ...at, bright);
+      } else if (lineWork(cell)) {
+        put(variant ? GLITCH[Math.floor(hash(column, row, 200 + variant) * GLITCH.length)] : strokeFor(cells.angle[cell], cells.height[cell]), ...at, bright);
       } else {
-        const glyph = RAMP[Math.min(RAMP.length - 1, 1 + Math.floor(clamp(tone * 1.08 + glow * 0.15) * (RAMP.length - 1)))];
-        put(glyph, ...at, mix(mix(background, ink, 0.62 + tone * 0.38), bright, glow * 0.6));
+        const level = 1 + Math.floor(clamp(tone * 1.08) * (RAMP.length - 1)) + (variant ? (hash(column, row, 300 + variant) < 0.5 ? 2 : -2) : 0);
+        put(RAMP[Math.max(1, Math.min(RAMP.length - 1, level))], ...at, mix(background, ink, 0.62 + tone * 0.38));
       }
+    };
+    // A faint field behind the subject, like an idle screen: dots, or stray bits for the matrix.
+    const field = (column: number, row: number) => {
+      if (!matrix) put('·', column, row, mix(background, ink, 0.16));
+      else if (hash(column, row, 3) < 0.55) put(hash(column, row, 4) < 0.5 ? '0' : '1', column, row, mix(background, ink, 0.07));
+    };
+    for (let row = 0; row < fieldRows; row++) for (let column = 0; column < fieldColumns; column++) field(column, row);
+    const step = Math.floor(frame.reveal * 8);
+    for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+      if (!shown(column, row)) continue;
+      const order = hash(column, row, 7);
+      // Mono resolves out of noise in random order; the matrix rains in from the top.
+      if (matrix ? row / rows > frame.reveal * 1.25 - order * 0.25 : frame.reveal < 1 && order > frame.reveal * 1.3) continue;
+      if (!matrix && frame.reveal < 1 && order > frame.reveal * 1.3 - 0.3) {
+        context.clearRect(PAD + column * cellWidth, PAD + row * cellHeight, cellWidth, cellHeight);
+        put(RAMP[1 + Math.floor(hash(column, row, step + 20) * (RAMP.length - 1))], column + offsetX, row + offsetY, mix(background, ink, 0.5));
+      } else draw(column, row, 0);
     }
     if (matrix) {
-      // Scanlines, then phosphor bloom.
-      context.fillStyle = css(background, 0.34);
-      for (let y = 2; y < height; y += 4) context.fillRect(0, y, width, 2);
+      scanlines(0, 0, width, height);
       bloom(canvas, 6, 0.6);
     } else {
       grain(canvas, 0.14);
       bloom(canvas, 5, 0.28);
+    }
+    if (!idle(frame)) return;
+    if (!matrix) {
+      // Idle effect: the output is not quite settled. On every step a few strokes on the
+      // outline scramble, and a few characters of the fill step along the ramp.
+      for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+        if (shown(column, row) && hash(column, row, 100 + frame.tick) < (lineWork(row * columns + column) ? 0.06 : 0.02)) draw(column, row, frame.tick);
+      }
+      return;
+    }
+    // Idle effect: digital rain. A third of the columns carry a drop that falls one cell per
+    // step, a bright head with a short fading tail, passing behind the subject...
+    for (let column = 0; column < fieldColumns; column++) {
+      if (hash(column, 0, 9) >= 0.32) continue;
+      const period = fieldRows + 6 + Math.floor(hash(column, 1, 9) * 12), head = (frame.tick + Math.floor(hash(column, 2, 9) * period)) % period;
+      for (let tail = 0; tail < RAIN.length; tail++) {
+        const row = head - tail;
+        if (row < 0 || row >= fieldRows || shown(column - offsetX, row - offsetY)) continue;
+        context.clearRect(column * cellWidth, row * cellHeight, cellWidth, cellHeight);
+        put(hash(column, row, 4) < 0.5 ? '0' : '1', column, row, tail ? mix(background, ink, RAIN[tail]) : mix(ink, [236, 255, 232], 0.7));
+        scanlines(column * cellWidth, row * cellHeight, cellWidth, cellHeight);
+      }
+    }
+    // ...and now and then a bit of the picture itself flips.
+    for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+      if (!shown(column, row) || hash(column, row, frame.tick) >= 0.012) continue;
+      draw(column, row, frame.tick);
+      scanlines(PAD + column * cellWidth, PAD + row * cellHeight, cellWidth, cellHeight);
     }
   }
 
@@ -179,21 +224,32 @@ export async function loadPortrait(source: string): Promise<Portrait> {
     context.font = "700 11px 'Card Mono', monospace";
     context.textBaseline = 'middle';
     context.textAlign = 'center';
-    for (let row = 0; row < Math.ceil(frame.reveal * rows); row++) for (let column = 0; column < columns; column++) {
-      const cell = row * columns + column, coverage = cells.coverage[cell], lineWork = cells.line[cell] > 0.2 || eyes.has(cell);
-      if (coverage < 0.25 || (coverage < 0.55 && !lineWork)) continue;
-      const u = column / columns, v = row / rows, glow = shine(u, v, frame.sweep), tone = cells.tone[cell];
-      const surface = lineWork ? outline : tone > 0.9 ? bright : tone > 0.58 ? body : shade;
-      const depth = clamp(0.62 + light(u, v) * 0.55 + (tone > 0.58 ? 0.12 : -0.12));
+    const lineWork = (cell: number) => cells.line[cell] > 0.2 || eyes.has(cell);
+    const shown = (cell: number) => cells.coverage[cell] >= (lineWork(cell) ? 0.25 : 0.55);
+    /** Draws one cell. A `variant` above 0 shows it still encrypted: a random cipher character. */
+    const draw = (column: number, row: number, variant: number) => {
+      const cell = row * columns + column, tone = cells.tone[cell], edge = lineWork(cell);
+      const surface = edge ? outline : tone > 0.9 ? bright : tone > 0.58 ? body : shade;
+      const depth = clamp(0.62 + light(column / columns, row / rows) * 0.55 + (tone > 0.58 ? 0.12 : -0.12));
       const x = PAD + column * cellWidth, y = top + row * cellHeight;
       // A dim tint behind each character joins the rows into one surface.
-      context.fillStyle = css(mix(background, surface, lineWork ? 0.2 : 0.14 + depth * 0.14));
+      context.clearRect(x, y, cellWidth, cellHeight);
+      context.fillStyle = css(mix(background, surface, edge ? 0.2 : 0.14 + depth * 0.14));
       context.fillRect(x, y, cellWidth, cellHeight);
-      context.fillStyle = css(mix(lineWork ? mix(background, surface, 0.92) : mix(mix(background, surface, 0.72), surface, depth), WHITE, glow * 0.55));
-      const glyph = eyes.has(cell) ? 'o' : lineWork ? strokeFor(cells.angle[cell], cells.height[cell]) : RAMP[Math.min(RAMP.length - 1, 2 + Math.floor(clamp(depth + glow * 0.2) * (RAMP.length - 2)))];
+      context.fillStyle = css(variant ? mix(surface, WHITE, 0.7) : edge ? mix(background, surface, 0.92) : mix(mix(background, surface, 0.72), surface, depth));
+      const glyph = variant ? CIPHER[Math.floor(hash(column, row, 400 + variant) * CIPHER.length)]
+        : eyes.has(cell) ? 'o' : edge ? strokeFor(cells.angle[cell], cells.height[cell]) : RAMP[Math.min(RAMP.length - 1, 2 + Math.floor(depth * (RAMP.length - 2)))];
       context.fillText(glyph, x + cellWidth / 2, y + cellHeight / 2 + 0.5);
-    }
+    };
+    for (let row = 0; row < Math.ceil(frame.reveal * rows); row++) for (let column = 0; column < columns; column++) if (shown(row * columns + column)) draw(column, row, 0);
     bloom(canvas, 4, 0.3);
+    if (!idle(frame)) return;
+    // Idle effect: decryption that never quite finishes. On every step a few characters
+    // fall back to cipher text, bright and random, and resolve again on the next.
+    for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+      const cell = row * columns + column;
+      if (shown(cell) && !lineWork(cell) && hash(column, row, 500 + frame.tick) < 0.03) draw(column, row, frame.tick);
+    }
   }
 
   /** ANSI art: shade blocks dithered between neighbouring colours of a ramp built from the theme. */
@@ -205,13 +261,15 @@ export async function loadPortrait(source: string): Promise<Portrait> {
     const mids = [hex(colors.blue), hex(colors.magenta)].sort((a, b) => luminance(a) - luminance(b));
     const tones = [mix(background, mids[0], 0.42), mids[0], mix(mids[1], bright, 0.3), mix(bright, WHITE, 0.3)];
     // Thin line work (whiskers) counts as filled; a block with no neighbour at all is a stray.
-    const filled = (column: number, row: number) => column >= 0 && row >= 0 && column < columns && row < rows
+    const solid = (column: number, row: number) => column >= 0 && row >= 0 && column < columns && row < rows
       && (cells.coverage[row * columns + column] >= 0.5 || cells.line[row * columns + column] >= 0.2);
-    for (let row = 0; row < Math.ceil(frame.reveal * rows); row++) for (let column = 0; column < columns; column++) {
-      if (!filled(column, row) || !(filled(column - 1, row) || filled(column + 1, row) || filled(column, row - 1) || filled(column, row + 1))) continue;
-      const cell = row * columns + column, u = column / columns, v = row / rows;
+    const filled = (column: number, row: number) => solid(column, row) && (solid(column - 1, row) || solid(column + 1, row) || solid(column, row - 1) || solid(column, row + 1));
+    const printed = Math.ceil(frame.reveal * rows);
+    for (let row = 0; row < printed; row++) for (let column = 0; column < columns; column++) {
+      if (!filled(column, row)) continue;
+      const cell = row * columns + column;
       const outline = cells.line[cell] > 0.3 || cells.coverage[cell] < 0.5;
-      const tone = outline ? 0 : clamp(cells.tone[cell] * 1.02 + light(u, v) * 0.3 + shine(u, v, frame.sweep) * 0.3);
+      const tone = outline ? 0 : clamp(cells.tone[cell] * 1.02 + light(column / columns, row / rows) * 0.3);
       const scaled = tone * (tones.length - 1), lower = Math.min(tones.length - 2, Math.floor(scaled));
       // Five shades per colour pair, as with the space, light, medium, dark and full block characters.
       const shade = Math.round((scaled - lower) * 4) / 4;
@@ -221,6 +279,33 @@ export async function loadPortrait(source: string): Promise<Portrait> {
       }
     }
     bloom(canvas, 6, 0.18);
+    // The cursor that printed the art: it follows the last printed row, then rests after
+    // the final block and blinks.
+    let last = Math.min(printed, rows) - 1;
+    while (last > 0 && !Array.from({ length: columns }, (_, column) => filled(column, last)).some(Boolean)) last--;
+    let end = columns - 1;
+    while (end > 0 && !filled(end, last)) end--;
+    if (last >= 0 && frame.reveal > 0 && (!idle(frame) || frame.tick % 4 < 2)) {
+      context.fillStyle = css(bright);
+      context.fillRect(PAD + (end + 1) * size + 2, PAD + (last - 1) * size, size, size * 2);
+    }
+    if (!idle(frame) || hash(frame.tick, 1, 70) >= 0.38) return;
+    // Idle effect: a redraw glitch. For one step the terminal prints a raw colour escape
+    // code where it should have painted the blocks.
+    const spans: [number, number][] = [];
+    for (let row = 0; row < rows - 1; row += 2) for (let column = 0; column + ESCAPE_CELLS <= columns; column++) {
+      if (Array.from({ length: ESCAPE_CELLS }, (_, offset) => filled(column + offset, row) && filled(column + offset, row + 1)).every(Boolean)) spans.push([column, row]);
+    }
+    if (!spans.length) return;
+    const [column, row] = spans[Math.floor(hash(frame.tick, 2, 70) * spans.length)];
+    const x = PAD + column * size, y = PAD + row * size;
+    context.fillStyle = css(background);
+    context.fillRect(x, y, ESCAPE_CELLS * size, size * 2);
+    context.font = "700 13px 'Card Mono', monospace";
+    context.textBaseline = 'middle';
+    context.textAlign = 'left';
+    context.fillStyle = css(hex(colors.fg));
+    context.fillText(`^[[38;5;${16 + Math.floor(hash(frame.tick, 3, 70) * 216)}m`, x + 3, y + size + 1);
   }
 
   return {

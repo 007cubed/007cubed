@@ -39,9 +39,7 @@ export interface State {
   open: 0 | 1 | 2 | 3;
   focus: 0 | 1 | 2;
   cursor: boolean;
-  /** Position of the light sweep across the portrait, 0-1, or -1 when there is none. */
-  sweep: number;
-  /** Animation step during a hold, for portrait effects that flicker. */
+  /** Idle animation step of the portrait: 0 at rest, counting up through the holds. */
   tick: number;
   /** Per window: characters typed of each command, and 0-1 progress of its output. */
   fetch: { typed: number; output: number };

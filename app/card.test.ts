@@ -52,9 +52,10 @@ test('timeline starts on the finished card and replays the session', () => {
   assert.equal(first.toast, false);
   for (const command of ['fetch', 'stats', 'top', 'heat'] as const) assert.deepEqual(first[command], { typed: COMMANDS[command].length, output: 1 });
   assert.ok(frames.some(frame => frame.state.open === 0), 'windows close to show the wallpaper');
-  // The last frame equals the first apart from the animation step, so the loop is seamless.
-  assert.deepEqual({ ...frames.at(-1)!.state, tick: 0 }, first);
-  assert.ok(frames.some(frame => frame.state.sweep >= 0) && frames.every(frame => frame.state.sweep === -1 || frame.state.open === 3), 'the light sweep runs only on the finished card');
+  // The last frame equals the first, so the loop is seamless.
+  assert.deepEqual(frames.at(-1)!.state, first);
+  // The portrait idles during the holds and is at rest while the session replays.
+  assert.ok(frames.some(frame => frame.state.tick > 0) && frames.every(frame => frame.state.tick === 0 || (frame.state.open === 3 && frame.state.fetch.output === 1)));
   assert.ok(frames.every(frame => frame.delay >= 20 && frame.delay % 10 === 0), 'GIF delays are whole centiseconds');
 });
 

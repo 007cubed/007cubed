@@ -41,7 +41,7 @@ function drawGraph(canvas: HTMLCanvasElement, weeks: number[], progress: number)
 function paint(state: State): void {
   const portraitCanvas = document.querySelector<HTMLCanvasElement>('#portrait');
   const theme = input.themes.find(candidate => candidate.key === state.theme)!;
-  if (portraitCanvas) portrait.draw(portraitCanvas, state.portrait, theme.colors, { sweep: state.sweep, tick: state.tick, reveal: state.fetch.output });
+  if (portraitCanvas) portrait.draw(portraitCanvas, state.portrait, theme.colors, { tick: state.tick, reveal: state.fetch.output });
   const graph = document.querySelector<HTMLCanvasElement>('#graph');
   if (graph) drawGraph(graph, input.profile.activity.weeks, state.top.output);
 }

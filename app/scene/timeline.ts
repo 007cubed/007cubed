@@ -19,12 +19,11 @@ export function buildTimeline(themes: string[], portraits: PortraitStyle[]): Fra
   if (!themes.length || !portraits.length) throw new Error('At least one theme and one portrait style are required');
   const looks = Array.from({ length: Math.max(themes.length, portraits.length) }, (_, index) => ({ theme: themes[index % themes.length], portrait: portraits[index % portraits.length] }));
   const frames: Frame[] = [];
-  let state: State = { ...looks[0], toast: false, open: 3, focus: 0, cursor: true, sweep: -1, tick: 0, fetch: done('fetch'), stats: done('stats'), top: done('top'), heat: done('heat') };
+  let state: State = { ...looks[0], toast: false, open: 3, focus: 0, cursor: true, tick: 0, fetch: done('fetch'), stats: done('stats'), top: done('top'), heat: done('heat') };
   const push = (delay: number, patch: Partial<State> = {}) => { state = { ...state, ...patch }; frames.push({ delay, state }); };
   const hold = (look: typeof looks[number], count: number) => {
     const toast = look.theme !== state.theme;
-    // A light sweep crosses the portrait early in every hold.
-    for (let index = 0; index < count; index++) push(250, { ...look, toast: toast && index < 6, cursor: index % 4 < 2, sweep: index >= 2 && index <= 7 ? (index - 2) / 5 : -1, tick: state.tick + (frames.length ? 1 : 0) });
+    for (let index = 0; index < count; index++) push(250, { ...look, toast: toast && index < 6, cursor: index % 4 < 2, tick: state.tick + (frames.length ? 1 : 0) });
   };
 
   if (looks.length === 1) hold(looks[0], 16);
@@ -34,7 +33,7 @@ export function buildTimeline(themes: string[], portraits: PortraitStyle[]): Fra
   }
 
   // Close everything, then let the windows tile back in one at a time.
-  push(700, { toast: false, cursor: true, sweep: -1, open: 0, fetch: idle, stats: idle, top: idle, heat: idle });
+  push(700, { toast: false, cursor: true, tick: 0, open: 0, fetch: idle, stats: idle, top: idle, heat: idle });
   push(280, { open: 1 });
   push(280, { open: 2 });
   push(450, { open: 3 });
