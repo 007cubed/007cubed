@@ -175,5 +175,4 @@ node_modules/
 .cache/
 .playwright-cli/
 previews/
-out/*-preview/
-out/card-preview.*
+out/preview*/

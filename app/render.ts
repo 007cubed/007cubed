@@ -1,54 +1,75 @@
-import {readFile,writeFile,mkdir,rename} from 'node:fs/promises';
-import {pathToFileURL} from 'node:url';
+// Renders the scene frame by frame in headless Chromium and exports fetch.gif and fetch.png.
+import { writeFile, mkdir, rename } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import {chromium} from 'playwright';
+import { chromium } from 'playwright';
 import sharp from 'sharp';
-import {transform} from 'esbuild';
-import {createRequire} from 'node:module';
-const {GIFEncoder,quantize}=createRequire(import.meta.url)('gifenc') as typeof import('gifenc').default;
-import type {Profile} from './model.js';
-export async function render(profile:Profile,output:string,preview=false){
- const config=JSON.parse(await readFile('config.json','utf8'));
- const {code}=await transform(await readFile('app/browser.ts','utf8'),{loader:'ts',target:'es2022',format:'iife'});
- const browser=await chromium.launch();
- await mkdir(output,{recursive:true});
- try{
-  const page=await browser.newPage({viewport:{width:1920,height:1200}});
-  await page.goto(pathToFileURL(path.resolve('assets/ascii-portrait.html')).href);
-  await page.addStyleTag({content:'main{display:none}body{display:block;margin:0}#card{width:1920px;height:1200px;max-width:none}'});
-  const portraitCode=await transform(await readFile('app/portrait.ts','utf8'),{loader:'ts',target:'es2022',format:'iife'});
-  await page.addScriptTag({content:portraitCode.code});
-  await page.addScriptTag({content:code});
-  await page.evaluate(async({profile,config,preview})=>window.prepareCard(profile,config,preview),{profile,config,preview});
-  const rgba:Buffer[]=[];
-  let first:Buffer|undefined;
-  for(let i=0;i<32;i++){
-   const encoded=await page.evaluate(time=>{window.drawCard(time);return document.querySelector<HTMLCanvasElement>('#card')!.toDataURL('image/png').split(',')[1];},i/4);
-   const png=Buffer.from(encoded,'base64');if(i===0)first=png;
-   rgba.push(await sharp(png).ensureAlpha().raw().toBuffer());
-  }
-  const samples=await Promise.all(rgba.map(data=>sharp(data,{raw:{width:1920,height:1200,channels:4}}).resize(480,300).raw().toBuffer()));
-  const palette=quantize(Buffer.concat(samples),256),gif=GIFEncoder();
-  // One persistent RGB565 mapping prevents static text colors changing as
-  // animated portrait colors enter the encoder in a different order.
-  const lookup=new Int16Array(65536).fill(-1);
-  function indexed(data:Buffer){
-   const result=new Uint8Array(data.length/4);
-   for(let pixel=0;pixel<result.length;pixel++){
-    const offset=pixel*4,key=((data[offset]>>3)<<11)|((data[offset+1]>>2)<<5)|(data[offset+2]>>3);
-    if(lookup[key]<0){
-     const r=((key>>11)&31)*255/31,g=((key>>5)&63)*255/63,b=(key&31)*255/31;
-     let distance=Infinity,best=0;
-     palette.forEach((color,index)=>{const score=(r-color[0])**2+(g-color[1])**2+(b-color[2])**2;if(score<distance){distance=score;best=index;}});
-     lookup[key]=best;
+import { themeKeys } from './config.js';
+import { buildPalette, DeltaGif, type Palette } from './gif.js';
+import { loadTheme } from './themes.js';
+import type { Profile } from './model.js';
+import type { CardConfig, SceneInput } from './scene/types.js';
+
+export const WIDTH = 1920, HEIGHT = 1200;
+/** GitHub READMEs load the GIF on every profile visit; refuse to publish a heavy one. */
+export const GIF_BUDGET = 3_000_000;
+const root = path.resolve(import.meta.dir, '..');
+/** Palette sampling takes every Nth pixel of each frame, starting one pixel later per frame. */
+const SAMPLE_STRIDE = 23;
+
+export interface RenderOptions {
+  output: string;
+  config: CardConfig;
+  /** A theme key or "cycle"; defaults to the configured theme. */
+  theme?: string;
+  preview?: boolean;
+}
+export interface RenderResult { frames: number; gifBytes: number; milliseconds: number }
+
+export async function render(profile: Profile, { output, config, theme, preview = false }: RenderOptions): Promise<RenderResult> {
+  const themes = await Promise.all(themeKeys(config, theme).map(key => loadTheme(key, path.join(root, 'themes'))));
+  const bundle = await Bun.build({ entrypoints: [path.join(root, 'app/scene/main.ts')], target: 'browser', format: 'iife' });
+  if (!bundle.success) throw new Error('Scene bundle failed');
+  const script = await bundle.outputs[0].text();
+  const input: SceneInput = { profile, config, themes, preview };
+
+  // CHROMIUM_PATH lets a system browser stand in for Playwright's own download.
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+  try {
+    // The page gets the validated snapshot only; it has no credentials and no network.
+    const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1, offline: true });
+    const page = await context.newPage();
+    await page.goto(pathToFileURL(path.join(root, 'assets/card.html')).href);
+    await page.addScriptTag({ content: script });
+    const frames = await page.evaluate(sceneInput => window.card.prepare(sceneInput), input);
+
+    // Pass 1: capture every frame as PNG and gather colour samples per theme.
+    const captures: Buffer[] = [];
+    const samples = new Map<string, Uint8Array[]>();
+    for (let index = 0; index < frames.length; index++) {
+      const misfits = await page.evaluate(frame => window.card.show(frame), index);
+      if (misfits.length) throw new Error(`Card content does not fit: ${[...new Set(misfits)].join(', ')}`);
+      const png = await page.screenshot({ type: 'png' });
+      captures.push(png);
+      const rgba = await sharp(png).ensureAlpha().raw().toBuffer();
+      const picked = new Uint8Array(Math.ceil((rgba.length / 4 - index % SAMPLE_STRIDE) / SAMPLE_STRIDE) * 4);
+      for (let pixel = index % SAMPLE_STRIDE, target = 0; pixel < rgba.length / 4; pixel += SAMPLE_STRIDE, target += 4) picked.set(rgba.subarray(pixel * 4, pixel * 4 + 4), target);
+      samples.set(frames[index].theme, [...(samples.get(frames[index].theme) ?? []), picked]);
     }
-    result[pixel]=lookup[key];
-   }
-   return result;
-  }
-  rgba.forEach((data,i)=>gif.writeFrame(indexed(data),1920,1200,{...(i===0?{palette}:{}),delay:250,repeat:0}));gif.finish();
-  // Complete both exports before replacing any previously generated images.
-  await writeFile(path.join(output,'fetch.png.tmp'),first!);await writeFile(path.join(output,'fetch.gif.tmp'),gif.bytes());
-  await rename(path.join(output,'fetch.png.tmp'),path.join(output,'fetch.png'));await rename(path.join(output,'fetch.gif.tmp'),path.join(output,'fetch.gif'));
- }finally{await browser.close();}
+    const palettes = new Map<string, Palette>([...samples].map(([key, parts]) => [key, buildPalette(Buffer.concat(parts))]));
+
+    // Pass 2: encode. One palette per theme keeps static pixels identical between frames.
+    const gif = new DeltaGif(WIDTH, HEIGHT);
+    for (let index = 0; index < frames.length; index++) {
+      gif.add(await sharp(captures[index]).ensureAlpha().raw().toBuffer(), frames[index].delay, palettes.get(frames[index].theme)!);
+    }
+    const bytes = gif.finish();
+    if (bytes.length > GIF_BUDGET) throw new Error(`GIF is ${(bytes.length / 1e6).toFixed(2)} MB, over the ${GIF_BUDGET / 1e6} MB budget`);
+
+    // Complete both exports before replacing any previously generated images.
+    await mkdir(output, { recursive: true });
+    await writeFile(path.join(output, 'fetch.png.tmp'), captures[0]); await writeFile(path.join(output, 'fetch.gif.tmp'), bytes);
+    await rename(path.join(output, 'fetch.png.tmp'), path.join(output, 'fetch.png')); await rename(path.join(output, 'fetch.gif.tmp'), path.join(output, 'fetch.gif'));
+    return { frames: frames.length, gifBytes: bytes.length, milliseconds: frames.reduce((sum, frame) => sum + frame.delay, 0) };
+  } finally { await browser.close(); }
 }

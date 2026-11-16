@@ -1,49 +1,37 @@
 {
-    "display_stats": [
-        "username",
-        "bio",
-        "location",
-        "company",
-        "email",
-        "hireable",
-        "followers",
-        "following",
-        "public_repos",
-        "public_gists",
-        "total_stars",
-        "total_lines_of_code",
-        "created_at",
-        "updated_at",
-        "languages",
-        "total_commits",
-        "total_issues",
-        "total_prs"
-    ],
-    "additional_info": "OS: Windows | Linux\nWeb: Astro | TypeScript | Svelte\nCMS: TinaCMS\nHosting: Cloudflare Workers\nAutomation: GitHub Actions | PowerShell | cron",
-    "preferred_color": "teal",
-    "max_languages": 5,
-    "append_automatic": true,
-    "exclude_orgainzations": true,
-    "profile_info": [
-        [
-            "OS",
-            "Windows / Linux"
-        ],
-        [
-            "Web",
-            "Astro / TypeScript / Svelte"
-        ],
-        [
-            "CMS",
-            "TinaCMS"
-        ],
-        [
-            "Hosting",
-            "Cloudflare Workers"
-        ],
-        [
-            "Automation",
-            "GitHub Actions / PowerShell / cron"
-        ]
-    ]
+  "host": "omarchy",
+  "timezone": "Europe/Copenhagen",
+  "theme": "tokyo-night",
+  "cycle": ["tokyo-night", "catppuccin", "gruvbox", "kanagawa", "everforest", "nord", "rose-pine"],
+  "sections": [
+    {
+      "color": "blue",
+      "rows": [
+        { "icon": "arch", "label": "OS", "value": "Omarchy 4 · Arch Linux" },
+        { "icon": "window", "label": "WM", "value": "Hyprland · Wayland" },
+        { "icon": "brush", "label": "Theme", "value": "{theme}" },
+        { "icon": "terminal", "label": "Term", "value": "foot · bash" },
+        { "icon": "laptop", "label": "Host", "value": "ROG Zephyrus G14" },
+        { "icon": "chip", "label": "Chips", "value": "Ryzen 7 7735HS · RTX 4070" }
+      ]
+    },
+    {
+      "color": "magenta",
+      "rows": [
+        { "icon": "study", "label": "Study", "value": "IT Security · EK Copenhagen" },
+        { "icon": "shield", "label": "Focus", "value": "GRC · DevSecOps · local AI" },
+        { "icon": "pin", "label": "Based", "value": "Copenhagen, DK" }
+      ]
+    },
+    {
+      "color": "green",
+      "rows": [
+        { "icon": "globe", "label": "Web", "value": "Astro · TypeScript · Svelte" },
+        { "icon": "edit", "label": "CMS", "value": "TinaCMS" },
+        { "icon": "cloud", "label": "Edge", "value": "Cloudflare Workers" },
+        { "icon": "gear", "label": "CI", "value": "GitHub Actions · cron · Bun" },
+        { "icon": "bolt", "label": "Agents", "value": "Claude Code · Orca" }
+      ]
+    }
+  ]
 }
