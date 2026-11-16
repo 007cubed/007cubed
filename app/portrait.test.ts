@@ -2,8 +2,8 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { cellStats, findSpots, strokeFor, SUPER } from './scene/cells.js';
 import { cutOut } from './scene/cutout.js';
+import { relief, reliefCells } from './scene/relief.js';
 
 type Color = [number, number, number];
 /** A width x height RGBA image where `paint` returns the colour of each pixel. */
@@ -80,48 +80,47 @@ test('cut-out of the fixture avatar is one clean subject', async () => {
     // No solid pixel still carries the background colour.
     if (rgba[index + 3] === 255) assert.ok(Math.hypot(rgba[index] - background[0], rgba[index + 1] - background[1], rgba[index + 2] - background[2]) > 36);
   }
-  // The two eyes are the only small round dark spots.
-  const crop = new Uint8ClampedArray(box.width * box.height * 4);
-  for (let y = 0; y < box.height; y++) crop.set(rgba.subarray(((box.top + y) * info.width + box.left) * 4, ((box.top + y) * info.width + box.left + box.width) * 4), y * box.width * 4);
-  const eyes = findSpots(crop, box.width, box.height);
-  assert.equal(eyes.length, 2);
-  assert.ok(eyes.every(eye => eye.y < 0.35) && Math.abs(eyes[0].x - eyes[1].x) > 0.08);
 });
 
-test('cells report coverage, tone and the direction of line work', () => {
-  // Each pattern sits in the middle cell of a 3x3 grid of plain fur.
-  const side = SUPER * 3;
-  const middle = (paint: (x: number, y: number) => Color | null) => {
-    const fine = image(side, side, (x, y) => (x >= SUPER && x < SUPER * 2 && y >= SUPER && y < SUPER * 2 ? paint(x - SUPER, y - SUPER) ?? FUR : FUR));
-    for (let y = 0; y < SUPER; y++) for (let x = 0; x < SUPER; x++) if (paint(x, y) === null) fine[((y + SUPER) * side + x + SUPER) * 4 + 3] = 0;
-    const cells = cellStats(fine, 3, 3);
-    return { coverage: cells.coverage[4], tone: cells.tone[4], line: cells.line[4], stroke: strokeFor(cells.angle[4], cells.height[4]) };
-  };
-  assert.deepEqual(middle(() => FUR), { coverage: 1, tone: middle(() => FUR).tone, line: 0, stroke: middle(() => FUR).stroke });
-  assert.ok(middle(() => FUR).tone > 0.6 && middle(() => FUR).tone < 0.8);
-  assert.ok(middle(() => WHITE).tone > middle(() => FUR).tone);
-  assert.equal(middle(x => (x < 2 ? null : FUR)).coverage, 0.5);
-  assert.equal(middle(() => null).coverage, 0);
-  const upright = middle(x => (x === 1 ? INK : FUR));
-  assert.equal(upright.stroke, '|');
-  assert.equal(upright.line, 0.25);
-  assert.equal(middle((_, y) => (y === 3 ? INK : FUR)).stroke, '_');
-  assert.equal(middle((_, y) => (y === 0 ? INK : FUR)).stroke, '¯');
-  assert.equal(middle((x, y) => (x === y ? INK : FUR)).stroke, '\\');
-  assert.equal(middle((x, y) => (x === SUPER - 1 - y ? INK : FUR)).stroke, '/');
-  assert.equal(strokeFor(170, 0.5), '-');
-  assert.throws(() => cellStats(new Uint8ClampedArray(16), 3, 3));
+/** A flat grey disc on a transparent ground, optionally split by a dark vertical line. */
+function disc(size: number, split = false): Uint8ClampedArray {
+  const rgba = image(size, size, x => (split && Math.abs(x - size / 2) < 2 ? INK : FUR));
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (Math.hypot(x - size / 2, y - size / 2) > size * 0.4) rgba[(y * size + x) * 4 + 3] = 0;
+  return rgba;
+}
+
+test('relief turns a flat shape into a lit dome', () => {
+  const size = 100, lit = relief(disc(size), size, size);
+  const at = (field: Float32Array, x: number, y: number) => field[y * size + x];
+  // Every pixel of the flat disc has the same colour; the light is what differs.
+  assert.equal(at(lit.albedo, 30, 30), at(lit.albedo, 70, 70));
+  assert.ok(at(lit.shade, 30, 30) > at(lit.shade, 50, 50) && at(lit.shade, 50, 50) > at(lit.shade, 70, 70), 'lit from the top left');
+  assert.ok(at(lit.rim, 77, 77) > 0.15 && at(lit.rim, 23, 23) === 0 && at(lit.rim, 50, 50) === 0, 'rim light on the far edge only');
+  let brightest = 0;
+  for (let index = 0; index < lit.gloss.length; index++) if (lit.gloss[index] > lit.gloss[brightest]) brightest = index;
+  assert.ok(brightest % size < 50 && Math.floor(brightest / size) < 50, 'the highlight sits towards the light');
+  assert.ok(at(lit.depth, 50, 50) === 1 && at(lit.depth, 50, 12) < 0.4 && at(lit.alpha, 2, 2) === 0);
+  for (const field of [lit.alpha, lit.albedo, lit.shade, lit.gloss, lit.rim, lit.depth, lit.line]) assert.ok(field.every(value => value >= 0 && value <= 1));
+  assert.throws(() => relief(new Uint8ClampedArray(16), size, size));
 });
 
-test('spots are small round dark shapes, not strokes or large areas', () => {
-  const size = 100;
-  const rgba = image(size, size, (x, y) => {
-    if (Math.hypot(x - 30, y - 30) < 3.2) return INK;      // an eye
-    if (y === 60 && x > 10 && x < 60) return INK;          // a whisker
-    if (x > 70 && y > 70) return INK;                      // a large dark area
-    return FUR;
-  });
-  const spots = findSpots(rgba, size, size);
-  assert.equal(spots.length, 1);
-  assert.ok(Math.abs(spots[0].x - 0.305) < 0.02 && Math.abs(spots[0].y - 0.305) < 0.02);
+test('an outline splits the relief into separate shapes', () => {
+  const size = 100, whole = relief(disc(size), size, size), split = relief(disc(size, true), size, size);
+  const middle = 50 * size + 50, beside = 50 * size + 56;
+  assert.equal(split.line[middle], 1);
+  assert.equal(whole.line[middle], 0);
+  assert.equal(split.depth[middle], 0);
+  assert.ok(split.depth[beside] < whole.depth[beside], 'the surface dips towards the line');
+  // Each half is a dome of its own: just right of the line the surface faces left, into the light.
+  assert.ok(split.shade[beside] > whole.shade[beside]);
+});
+
+test('relief cells average over the covered part of each cell', () => {
+  const size = 100, cells = reliefCells(relief(disc(size, true), size, size), 10, 10);
+  assert.equal(cells.columns, 10);
+  assert.equal(cells.alpha[0], 0);
+  assert.equal(cells.alpha[55], 1);
+  assert.ok(cells.alpha[12] > 0 && cells.alpha[12] < 1, 'a cell on the edge is partly covered');
+  assert.ok(cells.line[54] > 0.1 && cells.line[57] === 0);
+  assert.ok(cells.albedo[57] > 0.6 && cells.albedo[57] < 0.8);
 });

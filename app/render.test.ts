@@ -4,7 +4,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { loadConfig, portraitStyles } from './config.js';
+import { loadConfig } from './config.js';
 import { validateProfile } from './model.js';
 import { GIF_BUDGET, HEIGHT, render, WIDTH, type RenderOptions } from './render.js';
 import { loadTheme } from './themes.js';
@@ -56,8 +56,8 @@ const terminal = { x: 36, y: 700 };
 const text: Region = { left: 540, top: 150, width: 1360, height: 1030 };
 const portrait: Region = { left: 56, top: 150, width: 440, height: 650 };
 
-test('fixed theme export loops with steady text and a moving portrait', async () => {
-  await exported({ theme: 'tokyo-night' }, async result => {
+test('fixed theme export loops with steady text while the portrait changes style', async () => {
+  await exported({ theme: 'tokyo-night', portrait: 'cycle' }, async result => {
     const metadata = await animated(result.gif).metadata();
     assert.equal(metadata.width, WIDTH); assert.equal(metadata.pageHeight, HEIGHT); assert.equal(metadata.loop, 0);
     assert.ok(metadata.pages! > 40 && metadata.pages! <= result.frames);
@@ -65,12 +65,16 @@ test('fixed theme export loops with steady text and a moving portrait', async ()
     const still = await sharp(path.join(result.directory, 'fetch.png')).metadata();
     assert.equal(still.width, WIDTH); assert.equal(still.height, HEIGHT);
 
-    // During the opening hold a light sweep crosses the portrait; all text stays put.
-    const timeline = buildTimeline(['tokyo-night'], portraitStyles(config));
-    const sweeping = timeline.findIndex(frame => frame.state.sweep > 0.3 && frame.state.cursor);
-    const [first, swept] = [await pageFor(result, timeline, 0), await pageFor(result, timeline, sweeping)];
-    assert.deepEqual(await crop(first, text), await crop(swept, text));
-    assert.notDeepEqual(await crop(first, portrait), await crop(swept, portrait));
+    // From one hold to the next only the portrait is redrawn; all text stays put.
+    const timeline = buildTimeline(['tokyo-night'], [...PORTRAIT_STYLES]);
+    const restyled = timeline.findIndex(frame => frame.state.portrait !== timeline[0].state.portrait && frame.state.cursor);
+    const [first, second] = [await pageFor(result, timeline, 0), await pageFor(result, timeline, restyled)];
+    assert.deepEqual(await crop(first, text), await crop(second, text));
+    assert.notDeepEqual(await crop(first, portrait), await crop(second, portrait));
+
+    // While fastfetch is still printing, the portrait is only partly there.
+    const printing = timeline.findIndex(frame => frame.state.fetch.output > 0.3 && frame.state.fetch.output < 0.7);
+    assert.notDeepEqual(await crop(first, portrait), await crop(await pageFor(result, timeline, printing), portrait));
 
     // Later the windows close and the wallpaper shows where the terminal was.
     const theme = await loadTheme('tokyo-night');
@@ -125,5 +129,5 @@ test('content that does not fit stops the render instead of being clipped', asyn
 }, 60_000);
 
 test('an unknown portrait style is refused before anything is rendered', async () => {
-  await assert.rejects(render(profile, { output: tmpdir(), config, portrait: 'sepia', preview: true }), /portrait \(use blocks, color, matrix, mono or cycle\)/);
+  await assert.rejects(render(profile, { output: tmpdir(), config, portrait: 'sepia', preview: true }), /portrait \(use halftone, glyphs, led, disco or cycle\)/);
 });

@@ -41,33 +41,34 @@ test('portrait is one of the known styles or cycle, in config and as an override
   }
   assert.equal(validateConfig({ ...raw, portrait: 'cycle' }).portrait, 'cycle');
   assert.deepEqual(portraitStyles(config, 'cycle'), [...PORTRAIT_STYLES]);
-  for (const bad of ['ascii', '', 7, undefined, ['mono']]) assert.throws(() => validateConfig({ ...raw, portrait: bad }), /portrait \(use blocks, color, matrix, mono or cycle\)/);
+  for (const bad of ['ascii', '', 7, undefined, ['led']]) assert.throws(() => validateConfig({ ...raw, portrait: bad }), /portrait \(use halftone, glyphs, led, disco or cycle\)/);
   assert.throws(() => portraitStyles(config, 'sepia'), /portrait/);
 });
 
 test('timeline starts on the finished card and replays the session', () => {
-  const frames = buildTimeline(['tokyo-night'], ['blocks']);
+  const frames = buildTimeline(['tokyo-night'], ['halftone']);
   const first = frames[0].state;
   assert.equal(first.open, 3);
   assert.equal(first.toast, false);
   for (const command of ['fetch', 'stats', 'top', 'heat'] as const) assert.deepEqual(first[command], { typed: COMMANDS[command].length, output: 1 });
   assert.ok(frames.some(frame => frame.state.open === 0), 'windows close to show the wallpaper');
-  // The last frame equals the first apart from the animation step, so the loop is seamless.
-  assert.deepEqual({ ...frames.at(-1)!.state, tick: 0 }, first);
-  assert.ok(frames.some(frame => frame.state.sweep >= 0) && frames.every(frame => frame.state.sweep === -1 || frame.state.open === 3), 'the light sweep runs only on the finished card');
+  // The last frame equals the first, so the loop is seamless.
+  assert.deepEqual(frames.at(-1)!.state, first);
+  // The portrait idles during the holds and is at rest while the session replays.
+  assert.ok(frames.some(frame => frame.state.tick > 0) && frames.every(frame => frame.state.tick === 0 || (frame.state.open === 3 && frame.state.fetch.output === 1)));
   assert.ok(frames.every(frame => frame.delay >= 20 && frame.delay % 10 === 0), 'GIF delays are whole centiseconds');
 });
 
 test('cycling visits every theme once and announces each change', () => {
   const themes = ['tokyo-night', 'catppuccin', 'gruvbox'];
-  const frames = buildTimeline(themes, ['mono']);
+  const frames = buildTimeline(themes, ['glyphs']);
   const order = frames.map(frame => frame.state.theme).filter((theme, index, all) => theme !== all[index - 1]);
   assert.deepEqual(order, [...themes, themes[0]]);
   assert.equal(frames[0].state.toast, false);
   assert.ok(frames.find(frame => frame.state.theme === 'gruvbox')!.state.toast);
   assert.ok(frames.filter(frame => frame.state.open < 3).every(frame => frame.state.theme === themes[0]), 'the replay runs in the first theme');
-  assert.ok(frames.every(frame => frame.state.portrait === 'mono'));
-  assert.throws(() => buildTimeline([], ['mono']));
+  assert.ok(frames.every(frame => frame.state.portrait === 'glyphs'));
+  assert.throws(() => buildTimeline([], ['glyphs']));
   assert.throws(() => buildTimeline(themes, []));
 });
 
@@ -75,8 +76,8 @@ test('themes and portrait styles step together, each wrapping around', () => {
   const looks = (themes: string[], portraits: Parameters<typeof buildTimeline>[1]) => buildTimeline(themes, portraits)
     .filter(frame => frame.state.open === 3 && frame.state.fetch.output === 1)
     .map(frame => `${frame.state.theme}/${frame.state.portrait}`).filter((look, index, all) => look !== all[index - 1]);
-  assert.deepEqual(looks(['a', 'b', 'c'], ['mono', 'color']), ['a/mono', 'b/color', 'c/mono', 'a/mono']);
-  assert.deepEqual(looks(['a'], ['mono', 'color', 'blocks']), ['a/mono', 'a/color', 'a/blocks', 'a/mono']);
+  assert.deepEqual(looks(['a', 'b', 'c'], ['glyphs', 'led']), ['a/glyphs', 'b/led', 'c/glyphs', 'a/glyphs']);
+  assert.deepEqual(looks(['a'], ['glyphs', 'led', 'halftone']), ['a/glyphs', 'a/led', 'a/halftone', 'a/glyphs']);
   // A style change without a theme change is not announced as a theme change.
-  assert.ok(buildTimeline(['a'], ['mono', 'color']).every(frame => !frame.state.toast));
+  assert.ok(buildTimeline(['a'], ['glyphs', 'led']).every(frame => !frame.state.toast));
 });
