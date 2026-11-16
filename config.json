@@ -1,7 +1,7 @@
 {
   "host": "omarchy",
   "timezone": "Europe/Copenhagen",
-  "theme": "tokyo-night",
+  "theme": "cycle",
   "cycle": ["tokyo-night", "catppuccin", "gruvbox", "kanagawa", "everforest", "nord", "rose-pine"],
   "sections": [
     {

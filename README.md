@@ -59,9 +59,9 @@ bun test app/
 
 - Rows: edit `sections` in `config.json`. Icons are the names in `app/icons.ts`, and
   `{theme}` is replaced by the name of the theme on screen.
-- Theme: set `theme` in `config.json` to a file name from `themes/`, or to `cycle` to
-  step through the `cycle` list. The cycling GIF is about four times larger and its
-  Theme row changes with it.
+- Theme: `theme` in `config.json` is `cycle`, which steps through the `cycle` list
+  (about 2 MB GIF; the Theme row changes with it). Set it to a file name from
+  `themes/`, e.g. `tokyo-night`, for a fixed theme and a GIF about a quarter the size.
 - A new theme is one `colors.toml` in Omarchy's format plus a `name`, saved in
   `themes/`.
 

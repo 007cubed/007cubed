@@ -7,10 +7,10 @@ import { buildTimeline, COMMANDS } from './scene/timeline.js';
 
 test('committed config is valid and every theme it names loads', async () => {
   const config = await loadConfig();
-  assert.deepEqual(themeKeys(config), [config.theme]);
+  assert.deepEqual(themeKeys(config), config.theme === 'cycle' ? config.cycle : [config.theme]);
   assert.deepEqual(themeKeys(config, 'cycle'), config.cycle);
   assert.deepEqual(themeKeys(config, 'nord'), ['nord']);
-  for (const key of new Set([config.theme, ...config.cycle])) {
+  for (const key of new Set([...themeKeys(config), ...config.cycle])) {
     const theme = await loadTheme(key);
     assert.ok(theme.name);
     assert.match(theme.colors.accent, /^#[0-9a-f]{6}$/);
