@@ -67,14 +67,14 @@ bun test app/
   `themes/`.
 - Portrait: `portrait` in `config.json` picks how the avatar is drawn.
 
-  | Style | Look | Cycling GIF |
-  |---|---|---|
-  | `blocks` | ANSI art: shade blocks dithered along a ramp of the theme's colours | 1.6 MB |
-  | `color` | small characters coloured per surface, like a fastfetch logo | 2.0 MB |
-  | `matrix` | `0` and `1` in the theme's green with scanlines and phosphor glow | 2.7 MB |
-  | `mono` | one-colour character ramp with outlines as slash, bar and underscore strokes, and film grain | 2.4 MB |
+  | Style | Look | While idle | Cycling GIF |
+  |---|---|---|---|
+  | `blocks` | ANSI art: shade blocks dithered along a ramp of the theme's colours | the cursor that printed it blinks; now and then a raw colour escape code shows through | 1.4 MB |
+  | `color` | small characters coloured per surface, like a fastfetch logo | a few characters fall back to cipher text and resolve again | 1.8 MB |
+  | `matrix` | `0` and `1` in the theme's green with scanlines and phosphor glow | digital rain falls behind the subject and bits flip | 2.1 MB |
+  | `mono` | one-colour character ramp with outlines as slash, bar and underscore strokes, and film grain | strokes on the outline scramble and the fill steps along the ramp | 2.2 MB |
 
-  `cycle`, the default, gives every theme the next style in that order (2.0 MB with
+  `cycle`, the default, gives every theme the next style in that order (1.7 MB with
   all seven themes). The avatar is cut out of its background first; this needs an
   avatar with a flat-colour background, otherwise the whole image is used.
 
