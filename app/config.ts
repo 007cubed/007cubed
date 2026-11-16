@@ -1,11 +1,15 @@
 // config.json: the hand-written half of the card (info rows, host name, theme choice).
 import { readFile } from 'node:fs/promises';
 import { ICONS, type IconName } from './icons.js';
-import { ACCENTS, type Accent, type CardConfig } from './scene/types.js';
+import { ACCENTS, PORTRAIT_STYLES, type Accent, type CardConfig, type PortraitStyle } from './scene/types.js';
 
 function fail(message: string): never { throw new Error(`Invalid config: ${message}`); }
 function text(value: unknown, field: string, pattern = /^.{1,60}$/u): string {
   return typeof value === 'string' && pattern.test(value) ? value : fail(field);
+}
+
+function portraitStyle(value: unknown): PortraitStyle {
+  return PORTRAIT_STYLES.includes(value as PortraitStyle) ? value as PortraitStyle : fail(`portrait (use ${PORTRAIT_STYLES.join(', ')} or cycle)`);
 }
 
 export function validateConfig(value: unknown): CardConfig {
@@ -20,6 +24,7 @@ export function validateConfig(value: unknown): CardConfig {
     timezone,
     theme: text(data.theme, 'theme', themeName),
     cycle,
+    portrait: data.portrait === 'cycle' ? 'cycle' : portraitStyle(data.portrait),
     sections: sections.map(entry => {
       const section = (entry && typeof entry === 'object' ? entry : fail('sections')) as Record<string, unknown>;
       const rows = Array.isArray(section.rows) && section.rows.length ? section.rows : fail('sections.rows');
@@ -45,4 +50,9 @@ export async function loadConfig(file = 'config.json'): Promise<CardConfig> {
 /** The themes a render steps through: one, or the configured cycle. `choice` overrides config.theme. */
 export function themeKeys(config: CardConfig, choice = config.theme): string[] {
   return choice === 'cycle' ? config.cycle : [choice];
+}
+
+/** The portrait styles a render steps through, in step with the themes. `choice` overrides config.portrait. */
+export function portraitStyles(config: CardConfig, choice: string = config.portrait): PortraitStyle[] {
+  return choice === 'cycle' ? [...PORTRAIT_STYLES] : [portraitStyle(choice)];
 }

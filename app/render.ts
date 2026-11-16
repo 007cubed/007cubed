@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { themeKeys } from './config.js';
+import { portraitStyles, themeKeys } from './config.js';
 import { buildPalette, DeltaGif, type Palette } from './gif.js';
 import { loadTheme } from './themes.js';
 import type { Profile } from './model.js';
@@ -22,16 +22,18 @@ export interface RenderOptions {
   config: CardConfig;
   /** A theme key or "cycle"; defaults to the configured theme. */
   theme?: string;
+  /** A portrait style or "cycle"; defaults to the configured portrait. */
+  portrait?: string;
   preview?: boolean;
 }
 export interface RenderResult { frames: number; gifBytes: number; milliseconds: number }
 
-export async function render(profile: Profile, { output, config, theme, preview = false }: RenderOptions): Promise<RenderResult> {
+export async function render(profile: Profile, { output, config, theme, portrait, preview = false }: RenderOptions): Promise<RenderResult> {
   const themes = await Promise.all(themeKeys(config, theme).map(key => loadTheme(key, path.join(root, 'themes'))));
   const bundle = await Bun.build({ entrypoints: [path.join(root, 'app/scene/main.ts')], target: 'browser', format: 'iife' });
   if (!bundle.success) throw new Error('Scene bundle failed');
   const script = await bundle.outputs[0].text();
-  const input: SceneInput = { profile, config, themes, preview };
+  const input: SceneInput = { profile, config, themes, portraits: portraitStyles(config, portrait), preview };
 
   // CHROMIUM_PATH lets a system browser stand in for Playwright's own download.
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });

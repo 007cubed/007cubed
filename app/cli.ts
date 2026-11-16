@@ -7,8 +7,8 @@ import { validateProfile } from './model.js';
 const [command, ...flags] = process.argv.slice(2);
 const flag = (name: string) => flags.find(entry => entry.startsWith(`--${name}=`))?.slice(name.length + 3);
 try {
-  if (!['collect', 'render', 'preview', 'update'].includes(command) || flags.some(entry => !/^--(theme|out)=.+/.test(entry))) {
-    throw new Error('Use collect, render, preview, or update [--theme=<name|cycle>] [--out=<directory>]');
+  if (!['collect', 'render', 'preview', 'update'].includes(command) || flags.some(entry => !/^--(theme|portrait|out)=.+/.test(entry))) {
+    throw new Error('Use collect, render, preview, or update [--theme=<name|cycle>] [--portrait=<style|cycle>] [--out=<directory>]');
   }
   let profile;
   if (command === 'collect' || command === 'update') {
@@ -23,6 +23,6 @@ try {
     profile = validateProfile(JSON.parse(await readFile(snapshot, 'utf8').catch(() => { throw new Error(`No snapshot at ${snapshot}; run collect first`); })));
   }
   const output = flag('out') ?? (preview ? 'out/preview' : 'out');
-  const result = await render(profile, { output, config: await loadConfig(), theme: flag('theme'), preview });
+  const result = await render(profile, { output, config: await loadConfig(), theme: flag('theme'), portrait: flag('portrait'), preview });
   console.log(`${preview ? 'Preview ready' : 'Profile exported'}: ${output}/fetch.gif (${result.frames} frames, ${(result.milliseconds / 1000).toFixed(1)} s loop, ${(result.gifBytes / 1e6).toFixed(2)} MB)`);
 } catch (error) { console.error(error instanceof Error ? error.message : 'Profile update failed'); process.exitCode = 1; }

@@ -1,7 +1,6 @@
 // The desktop as HTML: a pure function of the input data and one animation state.
 import { icon } from '../icons.js';
 import { HEATMAP_WEEKS } from '../model.js';
-import { PORTRAIT } from './portrait.js';
 import { COMMANDS } from './timeline.js';
 import type { SceneInput, State, Theme } from './types.js';
 
@@ -60,7 +59,7 @@ function bar(input: SceneInput): string {
   return `<div class="bar"><div class="left"><span class="logo">${icon('arch')}</span>${workspaces}</div><div class="center">${esc(clock(input.profile.collectedAt, input.config.timezone))}</div><div class="right">${tray}</div></div>`;
 }
 
-function fetchWindow(input: SceneInput, state: State, theme: Theme, cursor: (active: boolean) => Cursor): string {
+function fetchWindow(input: SceneInput, state: State, theme: Theme, art: { width: number; height: number }, cursor: (active: boolean) => Cursor): string {
   const { profile, config, preview } = input;
   const { fetch, stats } = state;
   const lines = [
@@ -79,7 +78,7 @@ function fetchWindow(input: SceneInput, state: State, theme: Theme, cursor: (act
   return `<div class="win a${state.focus === 0 ? ' on' : ''}" data-fit="terminal window">
     ${prompt(COMMANDS.fetch, fetch.typed, cursor(fetch.output === 0))}
     <div class="fetch${hide(fetch.output === 0)}">
-      <div class="art"><canvas id="portrait" style="width:${PORTRAIT.columns * PORTRAIT.pitchX}px;height:${PORTRAIT.rows * PORTRAIT.pitchY}px"></canvas><div class="dots${hide(fetch.output < 1)}">${dots}</div></div>
+      <div class="art"><canvas id="portrait" style="width:${art.width}px;height:${art.height}px"></canvas><div class="dots${hide(fetch.output < 1)}">${dots}</div></div>
       <div class="rows">${lines.map((line, index) => (index < revealed ? line : `<div class="hid">${line}</div>`)).join('')}</div>
     </div>
     <div class="block${hide(fetch.output < 1)}">${prompt(COMMANDS.stats, stats.typed, cursor(stats.output === 0))}</div>
@@ -145,12 +144,13 @@ function heatWindow(input: SceneInput, state: State, cursor: (active: boolean) =
   </div>`;
 }
 
-export function view(input: SceneInput, state: State): string {
+/** `art` is the size the portrait will be drawn at, so the layout can make room before it is painted. */
+export function view(input: SceneInput, state: State, art: { width: number; height: number }): string {
   const theme = input.themes.find(candidate => candidate.key === state.theme);
   if (!theme) throw new Error(`Unknown theme: ${state.theme}`);
   const tokens = Object.entries(theme.colors).map(([token, value]) => `--${token}:${value}`).join(';');
   const cursorFor = (window: State['focus']) => (active: boolean): Cursor => (!active ? 'none' : state.focus !== window ? 'hollow' : state.cursor ? 'solid' : 'none');
-  const windows = [() => fetchWindow(input, state, theme, cursorFor(0)), () => topWindow(input, state, cursorFor(1)), () => heatWindow(input, state, cursorFor(2))];
+  const windows = [() => fetchWindow(input, state, theme, art, cursorFor(0)), () => topWindow(input, state, cursorFor(1)), () => heatWindow(input, state, cursorFor(2))];
   const toast = state.toast ? `<div class="toast"><span class="accent">${icon('brush')}</span><div><b class="bright">Theme changed</b><div>${esc(theme.name)}</div></div></div>` : '';
   return `<div class="desk" style="${tokens}">${wallpaper}${bar(input)}<div class="workspace open-${state.open}">${windows.slice(0, state.open).map(render => render()).join('')}</div>${toast}</div>`;
 }

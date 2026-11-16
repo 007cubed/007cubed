@@ -1,5 +1,5 @@
 // Browser entry point. It receives the validated snapshot and never touches the network.
-import { drawPortrait, samplePortrait } from './portrait.js';
+import { loadPortrait, type Portrait } from './portrait.js';
 import { buildTimeline } from './timeline.js';
 import { view } from './view.js';
 import type { Frame, SceneInput, State } from './types.js';
@@ -17,7 +17,7 @@ declare global {
 
 let input: SceneInput;
 let frames: Frame[] = [];
-let portrait: Uint8ClampedArray;
+let portrait: Portrait;
 
 /** Weekly totals as columns of dots, coloured by height like a btop graph. */
 function drawGraph(canvas: HTMLCanvasElement, weeks: number[], progress: number): void {
@@ -40,7 +40,8 @@ function drawGraph(canvas: HTMLCanvasElement, weeks: number[], progress: number)
 
 function paint(state: State): void {
   const portraitCanvas = document.querySelector<HTMLCanvasElement>('#portrait');
-  if (portraitCanvas) drawPortrait(portraitCanvas, portrait, state.tick, state.fetch.output);
+  const theme = input.themes.find(candidate => candidate.key === state.theme)!;
+  if (portraitCanvas) portrait.draw(portraitCanvas, state.portrait, theme.colors, { sweep: state.sweep, tick: state.tick, reveal: state.fetch.output });
   const graph = document.querySelector<HTMLCanvasElement>('#graph');
   if (graph) drawGraph(graph, input.profile.activity.weeks, state.top.output);
 }
@@ -54,14 +55,14 @@ function overflowing(): string[] {
 window.card = {
   async prepare(next) {
     input = next;
-    frames = buildTimeline(input.themes.map(theme => theme.key));
+    frames = buildTimeline(input.themes.map(theme => theme.key), input.portraits);
     await Promise.all(['400', '700'].map(weight => document.fonts.load(`${weight} 25px 'Card Mono'`)));
-    portrait = await samplePortrait(input.profile.avatar);
+    portrait = await loadPortrait(input.profile.avatar);
     return frames.map(frame => ({ delay: frame.delay, theme: frame.state.theme }));
   },
   show(index) {
     const { state } = frames[index];
-    document.body.innerHTML = view(input, state);
+    document.body.innerHTML = view(input, state, portrait);
     paint(state);
     return overflowing();
   },

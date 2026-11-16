@@ -3,6 +3,7 @@
   "timezone": "Europe/Copenhagen",
   "theme": "cycle",
   "cycle": ["tokyo-night", "catppuccin", "gruvbox", "kanagawa", "everforest", "nord", "rose-pine"],
+  "portrait": "cycle",
   "sections": [
     {
       "color": "blue",
